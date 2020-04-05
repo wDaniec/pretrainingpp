@@ -5,97 +5,61 @@ from torch.optim import lr_scheduler
 import numpy as np
 import torchvision
 from torchvision import datasets, models, transforms
-import matplotlib.pyplot as plt
 import time
 import os
 import copy
 import neptune
+import sys
+import utils
 
 
 from PIL import Image, ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 torch.manual_seed(0)
 
-BATCH_SIZE = 92
-TRAIN_NAME = "cifar"
-SEND_NEPTUNE = True
-NEPTUNE_NAME = "cifar10"
-OUT_SIZE = 10
+opt = utils.getConfig()
+print(opt)
 
-if SEND_NEPTUNE:
+print(opt.sendNeptune)
+
+if opt.sendNeptune:
     neptune.init('andrzejzdobywca/pretrainingpp')
-    neptune.create_experiment(name='minimal_example')
-
-data_dir = '~/data/lilImageNet'
-data_dir_cifar = '/mnt/remote/wmii_gmum_projects/datasets/vision'
+    exp = neptune.create_experiment(name=opt.sessionName)
 
 transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
 
-# image_datasets = {x: datasets.ImageFolder(os.path.join(data_dir, x),
-#                                           transform=transform)
-#                   for x in ['train', 'val']}
-
-image_datasets = {'train': torchvision.datasets.CIFAR10(root='./data_dir_cifar', train=True, download=True, transform=transform), 
-              'val': torchvision.datasets.CIFAR10(root='./data_dir_cifar', train=False, download=True, transform=transform)}
-
-
-class FullTrainingDataset(torch.utils.data.Dataset):
-    def __init__(self, full_ds, offset, length):
-        self.full_ds = full_ds
-        self.offset = offset
-        self.length = length
-        assert len(full_ds)>=offset+length, Exception("Parent Dataset not long enough")
-        super(FullTrainingDataset, self).__init__()
-        
-    def __len__(self):
-        return self.length
-    
-    def __getitem__(self, i):
-        return self.full_ds[i+self.offset]
-    
-def trainTestSplit(dataset, val_share):
-    val_offset = int(len(dataset)*val_share)
-    return FullTrainingDataset(dataset, 0, val_offset), FullTrainingDataset(dataset, val_offset, len(dataset)-val_offset)
-
+if opt.dataset == "Cifar":
+    image_datasets = {'train': torchvision.datasets.CIFAR10(root='./data_dir_cifar', train=True, download=True, transform=transform), 
+                'val': torchvision.datasets.CIFAR10(root='./data_dir_cifar', train=False, download=True, transform=transform)}
+    train_ds, _ = utils.trainTestSplit(image_datasets['train'], opt.cifarFactor)
+    image_datasets['train'] = train_ds
+else:
+    image_datasets = {x: datasets.ImageFolder(os.path.join('~/data/lilImageNet', x),
+                                          transform=transform)
+                  for x in ['train', 'val']}
  
-train_ds, _ = trainTestSplit(image_datasets['train'], 0.1)
 
-image_datasets['train'] = train_ds
-
-dataloaders = {x: torch.utils.data.DataLoader(image_datasets[x], batch_size=BATCH_SIZE,
+dataloaders = {x: torch.utils.data.DataLoader(image_datasets[x], batch_size=opt.batchSize,
                                              shuffle=True, num_workers=4)
               for x in ['train', 'val']}
 
 
 dataset_sizes = {x: len(image_datasets[x]) for x in ['train', 'val']}
 
-# class_names = image_datasets['train'].classes
-# print(class_names)
-print(len(image_datasets['val']))
-print(len(image_datasets['train']))
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+print('val length:', len(image_datasets['val']))
+print('train length:', len(image_datasets['train']))
+device = torch.device("cuda:{}".format(opt.gpuId) if torch.cuda.is_available() else "cpu")
+# device = torch.device("cpu")
 
+def train_model(model, criterion, optimizer, scheduler, num_epochs):
+    folder_name = "experiments/{}".format(opt.sessionName)
+    if not os.path.exists(folder_name):
+        os.mkdir(folder_name)
 
-
-def imshow(inp, title=None):
-    """Imshow for Tensor."""
-    inp = inp.numpy().transpose((1, 2, 0))
-    mean = np.array([0.485, 0.456, 0.406])
-    std = np.array([0.229, 0.224, 0.225])
-    inp = std * inp + mean
-    inp = np.clip(inp, 0, 1)
-    plt.imshow(inp)
-    if title is not None:
-        plt.title(title)
-    plt.pause(0.001)  # pause a bit so that plots are updated
-
-
-def train_model(model, criterion, optimizer, scheduler, num_epochs=25):
     since = time.time()
-
     best_model_wts = copy.deepcopy(model.state_dict())
     best_acc = 0.0
 
@@ -145,7 +109,7 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs=25):
             print('{} Loss: {:.4f} Acc: {:.4f}'.format(
                 phase, epoch_loss, epoch_acc))
             
-            if SEND_NEPTUNE:
+            if opt.sendNeptune:
                 neptune.send_metric('{}_loss'.format(phase), epoch_loss)
                 neptune.send_metric('{}_acc'.format(phase), epoch_acc)
 
@@ -153,7 +117,6 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs=25):
             if phase == 'val' and epoch_acc > best_acc:
                 best_acc = epoch_acc
                 best_model_wts = copy.deepcopy(model.state_dict())
-                torch.save(best_model_wts, "./{}_{}.pth".format(TRAIN_NAME, epoch))
 
         print()
 
@@ -164,24 +127,28 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs=25):
 
     # load best model weights
     model.load_state_dict(best_model_wts)
+    torch.save(best_model_wts, "./{}/best_model.pth".format(opt.sessionName, epoch))
     return model
 
 
 model_ft = models.mobilenet_v2()
 num_ftrs = model_ft.classifier[1].in_features
 
-model_ft.classifier[1] = nn.Linear(num_ftrs, OUT_SIZE)
+model_ft.classifier[1] = nn.Linear(num_ftrs, 100)
+if opt.pretrained:
+    model_ft.load_state_dict(torch.load(opt.net))
+
+
+num_ftrs = model_ft.classifier[1].in_features
+model_ft.classifier[1] = nn.Linear(num_ftrs, opt.outSize)
 
 model_ft = model_ft.to(device)
-
 criterion = nn.CrossEntropyLoss()
-
-# Observe that all parameters are being optimized
-optimizer_ft = optim.Adam(model_ft.parameters(), weight_decay=0.00004, lr=0.001)
-
-# Decay LR by a factor of 0.1 every 7 epochs
+optimizer_ft = optim.Adam(model_ft.parameters(), weight_decay=opt.weightDecay, lr=opt.lr)
 exp_lr_scheduler = lr_scheduler.StepLR(optimizer_ft, step_size=25, gamma=0.1)
 
-
+# exp_lr_scheduler jest wykomentowany!
 model_ft = train_model(model_ft, criterion, optimizer_ft, exp_lr_scheduler,
-                       num_epochs=200)
+                       num_epochs=180)
+if SEND_NEPTUNE:
+    neptune.stop()
