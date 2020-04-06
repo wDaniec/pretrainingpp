@@ -3,7 +3,9 @@ import argparse
 import time
 import copy
 import neptune
-from torchvision import transforms
+import os
+import torchvision
+from torchvision import datasets, transforms
 
 class FullTrainingDataset(torch.utils.data.Dataset):
     def __init__(self, full_ds, offset, length):
@@ -23,12 +25,33 @@ def trainTestSplit(dataset, val_share):
     val_offset = int(len(dataset)*val_share)
     return FullTrainingDataset(dataset, 0, val_offset), FullTrainingDataset(dataset, val_offset, len(dataset)-val_offset)
 
+
+def getCifar(opt):
+    image_datasets = {'train': torchvision.datasets.CIFAR10(root='./data_dir_cifar', train=True, download=True, transform=opt.transform), 
+                        'val': torchvision.datasets.CIFAR10(root='./data_dir_cifar', train=False, download=True, transform=opt.transform)}
+    train_ds, _ = trainTestSplit(image_datasets['train'], opt.cifarFactor)
+    image_datasets['train'] = train_ds
+    return image_datasets
+
+def getImageNet(opt):
+    image_datasets = {x: datasets.ImageFolder(os.path.join('~/data/lilImageNet', x),
+                                                transform=opt.transform)
+                        for x in ['train', 'val']}
+    return image_datasets
+
+def getCifarUnlabeled(opt):
+    image_dataset = torchvision.datasets.CIFAR10(root='./data_dir_cifar', train=True, download=True, transform=opt.transform)
+    image_dataset, _ = trainTestSplit(image_dataset, opt.cifarFactor)
+    return image_dataset
+
 def train_model(opt, net, dataset):
     model = net.model
     criterion = net.criterion
     optimizer = net.optimizer
     dataloaders = dataset.dataloaders
     dataset_sizes = dataset.dataset_sizes
+    if not opt.onlyLabeled:
+        dataloader_unlabeled = dataset.dataloader_unlabeled
 
     since = time.time()
     best_model_wts = copy.deepcopy(model.state_dict())
@@ -51,13 +74,18 @@ def train_model(opt, net, dataset):
 
             # Iterate over data.
             for idx, (inputs, labels) in enumerate(dataloaders[phase]):
-#                 print(idx, len(dataloaders[phase]))
+                if not opt.onlyLabeled:
+                    try:
+                        inputs_unlabeled, _ = next(it).to(opt.device)
+                    except:
+                        it = iter(dataloader_unlabeled)
+                        inputs_unlabeled, _ = next(it)
+                        inputs_unlabeled = inputs_unlabeled.to(opt.device)
                 inputs = inputs.to(opt.device)
                 labels = labels.to(opt.device)
 
                 # zero the parameter gradients
                 optimizer.zero_grad()
-
                 # forward
                 # track history if only in train
                 with torch.set_grad_enabled(phase == 'train'):
@@ -65,6 +93,13 @@ def train_model(opt, net, dataset):
                     _, preds = torch.max(outputs, 1)
                     loss = criterion(outputs, labels)
 
+                    if not opt.onlyLabeled:
+                        outputs_unlabeled1 = model(inputs_unlabeled)
+                        outputs_unlabeled2 = model(inputs_unlabeled)
+                        cons_loss = torch.abs(outputs_unlabeled1 - outputs_unlabeled2).sum()
+                        cons_loss = opt.beta * cons_loss / opt.batchSize
+                        # print(cons_loss)
+                        loss += cons_loss
                     # backward + optimize only if in training phase
                     if phase == 'train':
                         loss.backward()
@@ -88,6 +123,7 @@ def train_model(opt, net, dataset):
                 best_epoch = epoch
                 best_acc = epoch_acc
                 best_model_wts = copy.deepcopy(model.state_dict())
+                torch.save(best_model_wts, "./{}.pth".format(opt.sessionName))
 
         print()
 
@@ -99,8 +135,9 @@ def train_model(opt, net, dataset):
     # load best model weights
     if opt.sendNeptune:
         model.load_state_dict(best_model_wts)
-        torch.save(best_model_wts, "./best_model.pth")
-        neptune.send_artifact('best_model.pth')
+        localPath = "./best_model_{}.pth".format(opt.sessionName)
+        torch.save(best_model_wts, localPath)
+        neptune.send_artifact(localPath, 'best_model.pth')
     return model
 
 
@@ -117,16 +154,19 @@ def getConfig():
     parser.add_argument('--weightDecay', type=float, required=True)
     parser.add_argument('--epochs', type=int, required=True)
     parser.add_argument('--gpuId', type=int, required=True)
+    parser.add_argument('--beta', type=float, required=True)
 
     parserShell = argparse.ArgumentParser()
     parserShell.add_argument('--sendNeptune', action='store_true')
     parserShell.add_argument('--pretrained', action='store_true')
+    parserShell.add_argument('--onlyLabeled', action='store_true')
 
     opt = parser.parse_args(['@config.txt'])
     optShell = parserShell.parse_args()
 
     opt.sendNeptune = optShell.sendNeptune
     opt.pretrained = optShell.pretrained
+    opt.onlyLabeled = optShell.onlyLabeled
     opt.device = torch.device("cuda:{}".format(opt.gpuId) if torch.cuda.is_available() else "cpu")
     if opt.dataset == "Cifar":
         opt.outSize = 10

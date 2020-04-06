@@ -5,7 +5,6 @@ from torch.optim import lr_scheduler
 import numpy as np
 import torchvision
 from torchvision import datasets, models, transforms
-import os
 import neptune
 import sys
 import utils
@@ -16,6 +15,7 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 torch.manual_seed(0)
 
 opt = utils.getConfig()
+print(opt)
 
 if opt.sendNeptune:
     neptune.init('andrzejzdobywca/pretrainingpp')
@@ -42,23 +42,24 @@ class Network():
 class Dataset():
     def __init__(self):
         if opt.dataset == "Cifar":
-            image_datasets = {'train': torchvision.datasets.CIFAR10(root='./data_dir_cifar', train=True, download=True, transform=opt.transform), 
-                        'val': torchvision.datasets.CIFAR10(root='./data_dir_cifar', train=False, download=True, transform=opt.transform)}
-            train_ds, _ = utils.trainTestSplit(image_datasets['train'], opt.cifarFactor)
-            image_datasets['train'] = train_ds
-        else:
-            image_datasets = {x: datasets.ImageFolder(os.path.join('~/data/lilImageNet', x),
-                                                transform=opt.transform)
-                        for x in ['train', 'val']}
-        
+            labeled_images = utils.getCifar(opt)
+        elif opt.dataset == "ImageNet":
+            labeled_images = utils.getImageNet(opt)
+            unlabeled_images = utils.getCifar(opt)['train']
+            if not opt.onlyLabeled:
+                unlabeled_images = utils.getCifarUnlabeled(opt)
+                # tak naprawde to jest labeled, ale bede ignorowal
+                self.dataloader_unlabeled = torch.utils.data.DataLoader(unlabeled_images, batch_size=opt.batchSize, 
+                                                    shuffle=True, num_workers=4)
 
-        self.dataloaders = {x: torch.utils.data.DataLoader(image_datasets[x], batch_size=opt.batchSize,
+        self.dataloaders = {x: torch.utils.data.DataLoader(labeled_images[x], batch_size=opt.batchSize,
                                                     shuffle=True, num_workers=4) for x in ['train', 'val']}
-        
-        self.dataset_sizes = dataset_sizes = {x: len(image_datasets[x]) for x in ['train', 'val']}
 
-        print('val length:', len(image_datasets['val']))
-        print('train length:', len(image_datasets['train']))
+
+        self.dataset_sizes = {x: len(labeled_images[x]) for x in ['train', 'val']}
+
+        print('val length:', len(labeled_images['val']))
+        print('train length:', len(labeled_images['train']))
 
 
 dataset = Dataset()
