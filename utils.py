@@ -7,6 +7,11 @@ import os
 import torchvision
 from torchvision import datasets, transforms
 
+transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    ])
+
 class FullTrainingDataset(torch.utils.data.Dataset):
     def __init__(self, full_ds, offset, length):
         self.full_ds = full_ds
@@ -27,20 +32,20 @@ def trainTestSplit(dataset, val_share):
 
 
 def getCifar(opt):
-    image_datasets = {'train': torchvision.datasets.CIFAR10(root='./data_dir_cifar', train=True, download=True, transform=opt.transform), 
-                        'val': torchvision.datasets.CIFAR10(root='./data_dir_cifar', train=False, download=True, transform=opt.transform)}
+    image_datasets = {'train': torchvision.datasets.CIFAR10(root='./data_dir_cifar', train=True, download=True, transform=transform), 
+                        'val': torchvision.datasets.CIFAR10(root='./data_dir_cifar', train=False, download=True, transform=transform)}
     train_ds, _ = trainTestSplit(image_datasets['train'], opt.cifarFactor)
     image_datasets['train'] = train_ds
     return image_datasets
 
 def getImageNet(opt):
     image_datasets = {x: datasets.ImageFolder(os.path.join('~/data/lilImageNet', x),
-                                                transform=opt.transform)
+                                                transform=transform)
                         for x in ['train', 'val']}
     return image_datasets
 
 def getCifarUnlabeled(opt):
-    image_dataset = torchvision.datasets.CIFAR10(root='./data_dir_cifar', train=True, download=True, transform=opt.transform)
+    image_dataset = torchvision.datasets.CIFAR10(root='./data_dir_cifar', train=True, download=True, transform=transform)
     image_dataset, _ = trainTestSplit(image_dataset, opt.cifarFactor)
     return image_dataset
 
@@ -71,6 +76,7 @@ def train_model(opt, net, dataset):
 
             running_loss = 0.0
             running_corrects = 0
+            running_cons_loss = 0.0
 
             # Iterate over data.
             for idx, (inputs, labels) in enumerate(dataloaders[phase]):
@@ -98,6 +104,7 @@ def train_model(opt, net, dataset):
                         outputs_unlabeled2 = model(inputs_unlabeled)
                         cons_loss = torch.abs(outputs_unlabeled1 - outputs_unlabeled2).sum()
                         cons_loss = opt.beta * cons_loss / opt.batchSize
+                        running_cons_loss += cons_loss
                         # print(cons_loss)
                         loss += cons_loss
                     # backward + optimize only if in training phase
@@ -111,19 +118,22 @@ def train_model(opt, net, dataset):
 
             epoch_loss = running_loss / dataset_sizes[phase]
             epoch_acc = running_corrects.double() / dataset_sizes[phase]
+            epoch_cons_loss = running_cons_loss / dataset_sizes[phase]
             print('{} Loss: {:.4f} Acc: {:.4f}'.format(
                 phase, epoch_loss, epoch_acc))
             
             if opt.sendNeptune:
                 neptune.send_metric('{}_loss'.format(phase), epoch_loss)
                 neptune.send_metric('{}_acc'.format(phase), epoch_acc)
+                neptune.send_metric('{}_cons_loss'.format(phase), epoch_cons_loss)
 
             # deep copy the model
             if phase == 'val' and epoch_acc > best_acc:
                 best_epoch = epoch
                 best_acc = epoch_acc
                 best_model_wts = copy.deepcopy(model.state_dict())
-                torch.save(best_model_wts, "./{}.pth".format(opt.sessionName))
+                if not opt.pretrained:
+                    torch.save(best_model_wts, "./{}.pth".format(opt.sessionName))
 
         print()
 
@@ -147,14 +157,13 @@ def getConfig():
     parser.add_argument('--dataset', required=True, help='Cifar | ImageNet')
     parser.add_argument('--batchSize', type=int, required = True)
     parser.add_argument('--sessionName', required = True)
-    parser.add_argument('--pretrained', action='store_true')
     parser.add_argument('--net', )
     parser.add_argument('--cifarFactor', type=float, required = True)
-    parser.add_argument('--lr', type=float, required=True)
-    parser.add_argument('--weightDecay', type=float, required=True)
+    parser.add_argument('--lr', type=float)
+    parser.add_argument('--weightDecay', type=float)
     parser.add_argument('--epochs', type=int, required=True)
     parser.add_argument('--gpuId', type=int, required=True)
-    parser.add_argument('--beta', type=float, required=True)
+    parser.add_argument('--beta', type=float)
 
     parserShell = argparse.ArgumentParser()
     parserShell.add_argument('--sendNeptune', action='store_true')
@@ -172,9 +181,4 @@ def getConfig():
         opt.outSize = 10
     else:
         opt.outSize = 100
-
-    opt.transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-    ])
     return opt

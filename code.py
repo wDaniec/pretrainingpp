@@ -1,29 +1,15 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.optim import lr_scheduler
 import numpy as np
-import torchvision
 from torchvision import datasets, models, transforms
 import neptune
-import sys
 import utils
-
-
 from PIL import Image, ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
-torch.manual_seed(0)
-
-opt = utils.getConfig()
-print(opt)
-
-if opt.sendNeptune:
-    neptune.init('andrzejzdobywca/pretrainingpp')
-    exp = neptune.create_experiment(name=opt.sessionName)
-    exp.log_artifact('config.txt')
 
 class Network():
-    def __init__(self):
+    def __init__(self, opt):
         model_ft = models.mobilenet_v2()
         num_ftrs = model_ft.classifier[1].in_features
 
@@ -40,7 +26,7 @@ class Network():
 
 
 class Dataset():
-    def __init__(self):
+    def __init__(self, opt):
         if opt.dataset == "Cifar":
             labeled_images = utils.getCifar(opt)
         elif opt.dataset == "ImageNet":
@@ -62,11 +48,22 @@ class Dataset():
         print('train length:', len(labeled_images['train']))
 
 
-dataset = Dataset()
-net = Network()
+def run_train(opt):
+    print(opt)
 
-utils.train_model(opt, net, dataset)
+    if opt.sendNeptune:
+        neptune.init('andrzejzdobywca/pretrainingpp')
+        exp = neptune.create_experiment(name=opt.sessionName, params=vars(opt), tags=["best_experiment"]) 
+    dataset = Dataset(opt)
+    net = Network(opt)
 
-if opt.sendNeptune:
-    neptune.stop()
-    exit(1)
+    utils.train_model(opt, net, dataset)
+
+    if opt.sendNeptune:
+        neptune.stop()
+        # exit(1)
+    
+if __name__=='__main__':
+    opt = utils.getConfig()
+    print(vars(opt))
+    run_train(opt)
