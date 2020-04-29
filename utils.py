@@ -25,6 +25,16 @@ class FullTrainingDataset(torch.utils.data.Dataset):
     
     def __getitem__(self, i):
         return self.full_ds[i+self.offset]
+
+class ConcatDataset(torch.utils.data.Dataset):
+    def __init__(self, *datasets):
+        self.datasets = datasets
+    
+    def __getitem__(self, i):
+        return tuple(d[i % len(d)] for d in self.datasets)
+    
+    def __len__(self):
+        return max(len(d) for d in self.datasets)
     
 def trainTestSplit(dataset, val_share):
     val_offset = int(len(dataset)*val_share)
@@ -55,8 +65,6 @@ def train_model(opt, net, dataset):
     optimizer = net.optimizer
     dataloaders = dataset.dataloaders
     dataset_sizes = dataset.dataset_sizes
-    if not opt.onlyLabeled:
-        dataloader_unlabeled = dataset.dataloader_unlabeled
 
     since = time.time()
     best_model_wts = copy.deepcopy(model.state_dict())
@@ -79,14 +87,14 @@ def train_model(opt, net, dataset):
             running_cons_loss = 0.0
 
             # Iterate over data.
-            for idx, (inputs, labels) in enumerate(dataloaders[phase]):
+            for idx, batches in enumerate(dataloaders[phase]):
+
                 if not opt.onlyLabeled:
-                    try:
-                        inputs_unlabeled, _ = next(it).to(opt.device)
-                    except:
-                        it = iter(dataloader_unlabeled)
-                        inputs_unlabeled, _ = next(it)
-                        inputs_unlabeled = inputs_unlabeled.to(opt.device)
+                    inputs, labels = batches[0]
+                    inputs_unlabeled, _ = batches[1]
+                    inputs_unlabeled = inputs_unlabeled.to(opt.device)
+                else:
+                    inputs, labels = batches
                 inputs = inputs.to(opt.device)
                 labels = labels.to(opt.device)
 
@@ -100,6 +108,7 @@ def train_model(opt, net, dataset):
                     loss = criterion(outputs, labels)
 
                     if not opt.onlyLabeled:
+                        pass
                         outputs_unlabeled1 = model(inputs_unlabeled)
                         outputs_unlabeled2 = model(inputs_unlabeled)
                         cons_loss = torch.abs(outputs_unlabeled1 - outputs_unlabeled2).sum()

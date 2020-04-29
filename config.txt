@@ -1,18 +1,20 @@
 --dataset
 ImageNet
 --epochs
-180
+40
 --batchSize
 128
 --weightDecay
-0.00004
+0.001
 --lr
-0.0005
+0.00005
+--beta
+0.003
 --sessionName
-testuje
+ImageNet
 --net
 
 --cifarFactor
-0.1
+1
 --gpuId
 0

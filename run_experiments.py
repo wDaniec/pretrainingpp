@@ -13,19 +13,22 @@ def get_clean(opt, hparams):
     opt.weightDecay = weightDecay
     opt.beta = beta
     opt.sessionName = "ImageNet"
+    opt.pretrained = False
     opt.onlyLabeled = True
     return opt
 
 def get_ssl(opt, hparams):
     lr, weightDecay, beta = hparams
     opt = copy.deepcopy(opt)
-    opt.dataset = "ImageNet"
+    opt.dataset = "ImageNet+Cifar"
     opt.epochs = 40
     opt.batchSize = 128
     opt.lr = lr
     opt.weightDecay = weightDecay
     opt.beta = beta
     opt.sessionName = "ImageNet+Cifar"
+    opt.pretrained = False
+    opt.onlyLabeled = False
     return opt
 
 def get_pretrained_clean(opt, hparams):

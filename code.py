@@ -28,24 +28,22 @@ class Network():
 class Dataset():
     def __init__(self, opt):
         if opt.dataset == "Cifar":
-            labeled_images = utils.getCifar(opt)
+            final_datasets = utils.getCifar(opt)
         elif opt.dataset == "ImageNet":
+            final_datasets = utils.getImageNet(opt)
+        elif opt.dataset == "ImageNet+Cifar":
             labeled_images = utils.getImageNet(opt)
-            unlabeled_images = utils.getCifar(opt)['train']
-            if not opt.onlyLabeled:
-                unlabeled_images = utils.getCifarUnlabeled(opt)
-                # tak naprawde to jest labeled, ale bede ignorowal
-                self.dataloader_unlabeled = torch.utils.data.DataLoader(unlabeled_images, batch_size=opt.batchSize, 
-                                                    shuffle=True, num_workers=4)
+            unlabeled_images = utils.getCifar(opt)
+            final_datasets = {x: utils.ConcatDataset(labeled_images[x], unlabeled_images[x]) for x in ['train', 'val']}
 
-        self.dataloaders = {x: torch.utils.data.DataLoader(labeled_images[x], batch_size=opt.batchSize,
+        self.dataloaders = {x: torch.utils.data.DataLoader(final_datasets[x], batch_size=opt.batchSize,
                                                     shuffle=True, num_workers=4) for x in ['train', 'val']}
 
 
-        self.dataset_sizes = {x: len(labeled_images[x]) for x in ['train', 'val']}
+        self.dataset_sizes = {x: len(final_datasets[x]) for x in ['train', 'val']}
 
-        print('val length:', len(labeled_images['val']))
-        print('train length:', len(labeled_images['train']))
+        print('val length:', len(final_datasets['val']))
+        print('train length:', len(final_datasets['train']))
 
 
 def run_train(opt):
