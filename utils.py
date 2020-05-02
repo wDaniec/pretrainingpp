@@ -108,12 +108,11 @@ def train_model(opt, net, dataset):
                     loss = criterion(outputs, labels)
 
                     if not opt.onlyLabeled:
-                        pass
                         outputs_unlabeled1 = model(inputs_unlabeled)
                         outputs_unlabeled2 = model(inputs_unlabeled)
                         cons_loss = torch.abs(outputs_unlabeled1 - outputs_unlabeled2).sum()
                         cons_loss = opt.beta * cons_loss / opt.batchSize
-                        running_cons_loss += cons_loss
+                        running_cons_loss += cons_loss.item() * opt.batchSize
                         # print(cons_loss)
                         loss += cons_loss
                     # backward + optimize only if in training phase
@@ -123,6 +122,7 @@ def train_model(opt, net, dataset):
 
                 # statistics
                 running_loss += loss.item() * inputs.size(0)
+                print(running_loss, running_cons_loss)
                 running_corrects += torch.sum(preds == labels.data)
 
             epoch_loss = running_loss / dataset_sizes[phase]
@@ -152,11 +152,6 @@ def train_model(opt, net, dataset):
     print('Best val Acc: {:4f} achieved on model from epoch: {}'.format(best_acc, best_epoch))
 
     # load best model weights
-    if opt.sendNeptune:
-        model.load_state_dict(best_model_wts)
-        localPath = "./best_model_{}.pth".format(opt.sessionName)
-        torch.save(best_model_wts, localPath)
-        neptune.send_artifact(localPath, 'best_model.pth')
     return model
 
 

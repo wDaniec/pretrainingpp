@@ -51,7 +51,7 @@ def run_train(opt):
 
     if opt.sendNeptune:
         neptune.init('andrzejzdobywca/pretrainingpp')
-        exp = neptune.create_experiment(name=opt.sessionName, params=vars(opt), tags=["best_experiment"]) 
+        exp = neptune.create_experiment(name=opt.sessionName, params=vars(opt), tags=["grid_search"]) 
     dataset = Dataset(opt)
     net = Network(opt)
 
