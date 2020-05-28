@@ -5,26 +5,13 @@ import copy
 import neptune
 import os
 import torchvision
+import torch.nn as nn
 from torchvision import datasets, transforms
 
 transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
-
-class FullTrainingDataset(torch.utils.data.Dataset):
-    def __init__(self, full_ds, offset, length):
-        self.full_ds = full_ds
-        self.offset = offset
-        self.length = length
-        assert len(full_ds)>=offset+length, Exception("Parent Dataset not long enough")
-        super(FullTrainingDataset, self).__init__()
-        
-    def __len__(self):
-        return self.length
-    
-    def __getitem__(self, i):
-        return self.full_ds[i+self.offset]
 
 class ConcatDataset(torch.utils.data.Dataset):
     def __init__(self, *datasets):
@@ -36,16 +23,10 @@ class ConcatDataset(torch.utils.data.Dataset):
     def __len__(self):
         return max(len(d) for d in self.datasets)
     
-def trainTestSplit(dataset, val_share):
-    val_offset = int(len(dataset)*val_share)
-    return FullTrainingDataset(dataset, 0, val_offset), FullTrainingDataset(dataset, val_offset, len(dataset)-val_offset)
-
 
 def getCifar(opt):
     image_datasets = {'train': torchvision.datasets.CIFAR10(root='./data_dir_cifar', train=True, download=True, transform=transform), 
                         'val': torchvision.datasets.CIFAR10(root='./data_dir_cifar', train=False, download=True, transform=transform)}
-    train_ds, _ = trainTestSplit(image_datasets['train'], opt.cifarFactor)
-    image_datasets['train'] = train_ds
     return image_datasets
 
 def getImageNet(opt):
@@ -56,7 +37,6 @@ def getImageNet(opt):
 
 def getCifarUnlabeled(opt):
     image_dataset = torchvision.datasets.CIFAR10(root='./data_dir_cifar', train=True, download=True, transform=transform)
-    image_dataset, _ = trainTestSplit(image_dataset, opt.cifarFactor)
     return image_dataset
 
 def train_model(opt, net, dataset):
@@ -67,7 +47,7 @@ def train_model(opt, net, dataset):
     dataset_sizes = dataset.dataset_sizes
 
     since = time.time()
-    best_model_wts = copy.deepcopy(model.state_dict())
+    best_model_wts = copy.deepcopy(model.model_ft.state_dict())
     best_acc = 0.0
     best_epoch = 0
 
@@ -88,7 +68,6 @@ def train_model(opt, net, dataset):
 
             # Iterate over data.
             for idx, batches in enumerate(dataloaders[phase]):
-
                 if not opt.onlyLabeled:
                     inputs, labels = batches[0]
                     inputs_unlabeled, _ = batches[1]
@@ -103,26 +82,25 @@ def train_model(opt, net, dataset):
                 # forward
                 # track history if only in train
                 with torch.set_grad_enabled(phase == 'train'):
-                    outputs = model(inputs)
+
+                    outputs = model(inputs, not opt.pretrained)
                     _, preds = torch.max(outputs, 1)
                     loss = criterion(outputs, labels)
 
                     if not opt.onlyLabeled:
-                        outputs_unlabeled1 = model(inputs_unlabeled)
-                        outputs_unlabeled2 = model(inputs_unlabeled)
+                        outputs_unlabeled1 = model(inputs_unlabeled, 0)
+                        outputs_unlabeled2 = model(inputs_unlabeled, 0)
                         cons_loss = torch.abs(outputs_unlabeled1 - outputs_unlabeled2).sum()
                         cons_loss = opt.beta * cons_loss / opt.batchSize
                         running_cons_loss += cons_loss.item() * opt.batchSize
-                        # print(cons_loss)
                         loss += cons_loss
-                    # backward + optimize only if in training phase
+                        
                     if phase == 'train':
                         loss.backward()
                         optimizer.step()
 
                 # statistics
                 running_loss += loss.item() * inputs.size(0)
-                print(running_loss, running_cons_loss)
                 running_corrects += torch.sum(preds == labels.data)
 
             epoch_loss = running_loss / dataset_sizes[phase]
@@ -140,12 +118,10 @@ def train_model(opt, net, dataset):
             if phase == 'val' and epoch_acc > best_acc:
                 best_epoch = epoch
                 best_acc = epoch_acc
-                best_model_wts = copy.deepcopy(model.state_dict())
-                if not opt.pretrained:
-                    torch.save(best_model_wts, "./{}.pth".format(opt.sessionName))
+                best_model_wts = copy.deepcopy(model.model_ft.state_dict())
 
         print()
-
+    torch.save(best_model_wts, "./{}.pth".format(opt.sessionName))
     time_elapsed = time.time() - since
     print('Training complete in {:.0f}m {:.0f}s'.format(
         time_elapsed // 60, time_elapsed % 60))
@@ -162,7 +138,6 @@ def getConfig():
     parser.add_argument('--batchSize', type=int, required = True)
     parser.add_argument('--sessionName', required = True)
     parser.add_argument('--net', )
-    parser.add_argument('--cifarFactor', type=float, required = True)
     parser.add_argument('--lr', type=float)
     parser.add_argument('--weightDecay', type=float)
     parser.add_argument('--epochs', type=int, required=True)

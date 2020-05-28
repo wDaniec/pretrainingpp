@@ -14,7 +14,5 @@ ImageNet
 ImageNet
 --net
 
---cifarFactor
-1
 --gpuId
-1
+2

@@ -8,20 +8,34 @@ import utils
 from PIL import Image, ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
-class Network():
+class Model(nn.Module):
     def __init__(self, opt):
+        super(Model, self).__init__()
         model_ft = models.mobilenet_v2()
         num_ftrs = model_ft.classifier[1].in_features
-
-        model_ft.classifier[1] = nn.Linear(num_ftrs, 100)
+        model_ft.classifier[1] = nn.Identity()
         if opt.pretrained:
             model_ft.load_state_dict(torch.load(opt.net))
-        num_ftrs = model_ft.classifier[1].in_features
-        model_ft.classifier[1] = nn.Linear(num_ftrs, opt.outSize)
 
-        self.model = model_ft.to(opt.device)
+        self.model_ft = model_ft.to(opt.device)
+        self.cifar_layer = nn.Linear(num_ftrs, 10).to(opt.device)
+        self.imagenet_layer = nn.Linear(num_ftrs, 100).to(opt.device)
+    
+    def forward(self, x, z):
+        if z == 0:
+            x = self.model_ft(x)
+            return self.cifar_layer(x)
+        else:
+            x = self.model_ft(x)
+            return self.imagenet_layer(x)
+        
+
+class Network():
+    def __init__(self, opt):
+        self.model = Model(opt)
         self.criterion = nn.CrossEntropyLoss()
-        self.optimizer = optim.Adam(model_ft.parameters(), weight_decay=opt.weightDecay, lr=opt.lr)
+        self.optimizer = optim.Adam(self.model.parameters(), weight_decay=opt.weightDecay, lr=opt.lr)
+    
 
 
 
@@ -51,10 +65,9 @@ def run_train(opt):
 
     if opt.sendNeptune:
         neptune.init('andrzejzdobywca/pretrainingpp')
-        exp = neptune.create_experiment(name=opt.sessionName, params=vars(opt), tags=["grid_search"]) 
+        exp = neptune.create_experiment(name=opt.sessionName, params=vars(opt), tags=[opt.main_tag, opt.tag])
     dataset = Dataset(opt)
     net = Network(opt)
-
     utils.train_model(opt, net, dataset)
 
     if opt.sendNeptune:
