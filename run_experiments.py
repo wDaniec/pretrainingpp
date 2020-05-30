@@ -7,7 +7,7 @@ def get_clean(opt, hparams):
     lr, weightDecay, beta = hparams
     opt = copy.deepcopy(opt)
     opt.dataset = "ImageNet"
-    opt.epochs = 1
+    opt.epochs = 40
     opt.batchSize = 128
     opt.lr = lr
     opt.weightDecay = weightDecay
@@ -22,7 +22,7 @@ def get_ssl(opt, hparams):
     lr, weightDecay, beta = hparams
     opt = copy.deepcopy(opt)
     opt.dataset = "ImageNet+Cifar"
-    opt.epochs = 1
+    opt.epochs = 40
     opt.batchSize = 128
     opt.lr = lr
     opt.weightDecay = weightDecay
@@ -37,7 +37,7 @@ def get_pretrained_clean(opt, hparams):
     lr ,weightDecay, beta = hparams
     opt = copy.deepcopy(opt)
     opt.dataset = "Cifar"
-    opt.epochs = 1
+    opt.epochs = 80
     opt.batchSize = 128
     opt.lr = lr
     opt.weightDecay = weightDecay
@@ -51,7 +51,7 @@ def get_pretrained_ssl(opt, hparams):
     lr, weightDecay, beta = hparams
     opt = copy.deepcopy(opt)
     opt.dataset = "Cifar"
-    opt.epochs = 1
+    opt.epochs = 80
     opt.batchSize = 128
     opt.lr = lr
     opt.weightDecay = weightDecay
@@ -75,15 +75,15 @@ def run_multiple_with_pretrain():
             opt_pretrained_clean = get_pretrained_clean(opt, hparams)
             opt_pretrained_ssl = get_pretrained_ssl(opt, hparams)
 
-            # opt_clean.sessionName = "{}_id:{}-{}".format(sessionName, i, j)
-            # run_train(opt_clean)
+            opt_clean.sessionName = "{}_id:{}-{}".format(sessionName, i, j)
+            run_train(opt_clean)
 
             opt_ssl.sessionName = "{}+Cifar_id:{}-{}".format(sessionName, i, j)
             run_train(opt_ssl)
 
-            # opt_pretrained_clean.sessionName = "{}->Cifar_id:{}-{}".format(sessionName, i, j)
-            # opt_pretrained_clean.net = "./"+opt_clean.sessionName+".pth"
-            # run_train(opt_pretrained_clean)
+            opt_pretrained_clean.sessionName = "{}->Cifar_id:{}-{}".format(sessionName, i, j)
+            opt_pretrained_clean.net = "./"+opt_clean.sessionName+".pth"
+            run_train(opt_pretrained_clean)
 
             opt_pretrained_ssl.sessionName = "{}+Cifar->Cifar_id:{}-{}".format(sessionName, i, j)
             opt_pretrained_ssl.net = "./"+opt_ssl.sessionName+".pth"
@@ -107,25 +107,27 @@ def run_multiple_beta():
 
 def run_multiple_best_beta():
     opt = utils.getConfig()
-    lr, weightDecay, beta = (0.0025, 0.0002, 0.005)
+    lr, weightDecay, beta = (0.0025, 0.0002, 1)
     sessionName = "ImageNet"
-    opt.main_tag = "multi-task-learning"
-    j = 3
-    for i in range(5):
-        hparams = (lr, weightDecay, beta)
+    opt.main_tag = "bigger-beta"
+
+    j = 2
+    opt.tag2 = "beta_{}".format(j)
+    for i in range(3):
+        hparams = (lr, weightDecay, (1.0/2 ** j) * beta)
         opt_clean = get_clean(opt, hparams)
         opt_ssl = get_ssl(opt, hparams)
         opt_pretrained_clean = get_pretrained_clean(opt, hparams)
         opt_pretrained_ssl = get_pretrained_ssl(opt, hparams)
 
-        opt_clean.sessionName = "{}_id:{}-{}".format(sessionName, j, i)
+        # opt_clean.sessionName = "{}_id:{}-{}".format(sessionName, j, i)
         # run_train(opt_clean)
 
         opt_ssl.sessionName = "{}+Cifar_id:{}-{}".format(sessionName, j, i)
         run_train(opt_ssl)
 
-        opt_pretrained_clean.sessionName = "{}->Cifar_id:{}-{}".format(sessionName, j, i)
-        opt_pretrained_clean.net = "./"+opt_clean.sessionName+".pth"
+        # opt_pretrained_clean.sessionName = "{}->Cifar_id:{}-{}".format(sessionName, j, i)
+        # opt_pretrained_clean.net = "./"+opt_clean.sessionName+".pth"
         # run_train(opt_pretrained_clean)
 
         opt_pretrained_ssl.sessionName = "{}+Cifar->Cifar_id:{}-{}".format(sessionName, j, i)
@@ -133,6 +135,6 @@ def run_multiple_best_beta():
         run_train(opt_pretrained_ssl)
 
 if __name__=='__main__':
-    # run_multiple_best_beta()
-    run_multiple_with_pretrain()
+    run_multiple_best_beta()
+    # run_multiple_with_pretrain()
     # run_multiple_beta()
